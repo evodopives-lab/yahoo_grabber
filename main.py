@@ -8,12 +8,14 @@ app = FastAPI()
 session = requests.Session()
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive"
 }
 
 # ─────────────────────────────────────
-# 🔹 CRUMB
+# 🔹 CRUMB (opcional)
 # ─────────────────────────────────────
 def get_crumb():
     try:
@@ -30,17 +32,27 @@ def get_crumb():
 
 
 # ─────────────────────────────────────
-# 🔹 FALLBACK (sempre funciona)
+# 🔹 FALLBACK PRINCIPAL (query2)
 # ─────────────────────────────────────
 def fallback_quote(ticker: str):
     try:
-        url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={ticker}.SA"
+        url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={ticker}.SA"
         r = requests.get(url, headers=HEADERS, timeout=5)
 
         if r.status_code != 200:
-            return {"error": f"fallback HTTP {r.status_code}"}
+            return {
+                "error": f"fallback HTTP {r.status_code}",
+                "hint": "Yahoo pode estar bloqueando IP"
+            }
 
-        data = r.json()
+        if not r.text:
+            return {"error": "fallback vazio"}
+
+        try:
+            data = r.json()
+        except:
+            return {"error": "fallback não é JSON", "raw": r.text[:200]}
+
         result = data.get("quoteResponse", {}).get("result", [])
 
         if not result:
@@ -53,7 +65,7 @@ def fallback_quote(ticker: str):
             "pvp": result.get("priceToBook"),
             "lpa": result.get("epsTrailingTwelveMonths"),
             "marketCap": result.get("marketCap"),
-            "source": "fallback"
+            "source": "fallback_query2"
         }
 
     except Exception as e:
@@ -75,22 +87,21 @@ def get_fundamentos_raw(ticker: str):
 
     crumb = get_crumb()
 
+    # Se não conseguir crumb → vai direto fallback
     if not crumb:
         return fallback_quote(ticker)
 
     url = (
-        f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
+        f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/"
         f"{ticker}.SA?modules=financialData,defaultKeyStatistics&crumb={crumb}"
     )
 
     try:
         r = session.get(url, headers=HEADERS, timeout=10)
 
-        # 🔥 valida status
         if r.status_code != 200:
             return fallback_quote(ticker)
 
-        # 🔥 evita erro JSON
         if not r.text:
             return fallback_quote(ticker)
 
@@ -144,4 +155,7 @@ def fundamentos(ticker: str):
 # ─────────────────────────────────────
 @app.get("/health")
 def health():
-    return {"status": "running", "time": time.time()}
+    return {
+        "status": "running",
+        "time": time.time()
+    }
